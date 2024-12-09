@@ -345,12 +345,12 @@ def server(input, output, session):
     @reactive.event(input.btnOpenKittyflapOutside)
     def on_action_open_kittyflap_outside():
         simulate_kittyflap = CONFIG['SIMULATE_KITTYFLAP'].lower() == "true"
-        lock = "o" if input.btnOpenKittyflapInside() else "null"
+        lock = "o" if input.btnOpenKittyflapOutside() else "null"
         success = systemcmd(["/root/kittyhack/scripts/overrideLock.sh", lock], simulate_kittyflap)
         if success:
-            ui.notification_show(_("Kittyflap is opening now..."), duration=5, type="message")
+            ui.notification_show(_("Outside lock is opening now..." if input.btnOpenKittyflapOutside() else "Outside lock is closing now..."), duration=5, type="message")
         else:
-            ui.notification_show(_("An error occurred while opening Kittyflap."), duration=5, type="error")
+            ui.notification_show(_("An error occurred while opening outside lock."), duration=5, type="error")
     
     @reactive.Effect
     @reactive.event(input.btnOpenKittyflapInside)
@@ -359,9 +359,9 @@ def server(input, output, session):
         lock = "i" if input.btnOpenKittyflapInside() else "null"
         success = systemcmd(["/root/kittyhack/scripts/overrideLock.sh", lock], simulate_kittyflap)
         if success:
-            ui.notification_show(_("Kittyflap is opening now..."), duration=5, type="message")
+            ui.notification_show(_("Inside lock is opening now..." if input.btnOpenKittyflaptInside() else "Inside lock is closing now..."), duration=5, type="message")
         else:
-            ui.notification_show(_("An error occurred while opening Kittyflap."), duration=5, type="error")
+            ui.notification_show(_("An error occurred while opening inside lock."), duration=5, type="error")
     
     @reactive.Effect
     @reactive.event(input.btnRestartKittyflap)
