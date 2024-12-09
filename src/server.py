@@ -326,11 +326,47 @@ def server(input, output, session):
                 ui.column(12, ui.h3(_("Kittyflap System Actions"))),
                 ui.column(12, ui.help_text(_("Start tasks/actions on the Kittyflap"))),
                 ui.br(),
-                ui.input_action_button("bRestartKittyflap", _("Restart Kittyflap")),
+                ui.input_action_button("bOpenKittyflapOutside", _("Let kitty out")),
+                ui.br(),
+                ui.input_action_button("bOpenKittyflapInside", _("Let kitty in")),
+                ui.hr(),
+                ui.input_action_button("bRestartKworker", _("Restart Kittyflap (service)")),
+                ui.br(),
+                ui.input_action_button("bRestartKittyflap", _("Restart Kittyflap (device)")),
                 ui.hr(),
                 ui.br(),
                 ui.br()
             )
+    
+    @reactive.Effect
+    @reactive.event(input.bOpenKittyflapOutside)
+    def on_action_open_kittyflap_outside():
+        simulate_kittyflap = CONFIG['SIMULATE_KITTYFLAP'].lower() == "true"
+        success = systemcmd(["/root/kittyhack/scripts/overrideLock.sh", "o"], simulate_kittyflap)
+        if success:
+            ui.notification_show(_("Kittyflap is opening now..."), duration=5, type="message")
+        else:
+            ui.notification_show(_("An error occurred while opening Kittyflap."), duration=5, type="error")
+    
+    @reactive.Effect
+    @reactive.event(input.bOpenKittyflapInside)
+    def on_action_open_kittyflap_inside():
+        simulate_kittyflap = CONFIG['SIMULATE_KITTYFLAP'].lower() == "true"
+        success = systemcmd(["/root/kittyhack/scripts/overrideLock.sh", "i"], simulate_kittyflap)
+        if success:
+            ui.notification_show(_("Kittyflap is opening now..."), duration=5, type="message")
+        else:
+            ui.notification_show(_("An error occurred while opening Kittyflap."), duration=5, type="error")
+    
+    @reactive.Effect
+    @reactive.event(input.bRestartKworker)
+    def on_action_restart_system():
+        simulate_kittyflap = CONFIG['SIMULATE_KITTYFLAP'].lower() == "true"
+        success = systemcmd(["systemctl", "restart", "kwork.service"], simulate_kittyflap)
+        if success:
+            ui.notification_show(_("Kittyflap service is restarting now..."), duration=5, type="message")
+        else:
+            ui.notification_show(_("An error occurred while restarting Kittyflap service."), duration=5, type="error")
     
     @reactive.Effect
     @reactive.event(input.bRestartKittyflap)
