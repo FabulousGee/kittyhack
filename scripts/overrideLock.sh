@@ -15,6 +15,8 @@ i)  # inner magnetic lock
 o)  # outer magnetic lock
     echo 1 > /sys/class/gpio/gpio524/value
     ;;
+null) # just a dummy to close both locks
+    ;;
 *) # show some usage information
     echo "For handling the magnetic locks manually, please choose an option."
     echo "Usage: \"./overrideLock.sh <c>\""
