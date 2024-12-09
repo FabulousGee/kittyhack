@@ -172,6 +172,10 @@ install_kittyhack() {
         fi
     fi
 
+    echo -e "${YELLOW}Making all kittyhack scripts runnable...${NC}"
+    find /root/kittyhack/scripts/ -type f -iname "*.sh" -exec chmod +x {} \;
+    echo -e "${GREEN}Set chmod +x successfully.${NC}"
+
     echo -e "${CYAN}--- Step 7: Set up Python virtual environment ---${NC}"
     python3 -m venv /root/kittyhack/.venv
     source /root/kittyhack/.venv/bin/activate
