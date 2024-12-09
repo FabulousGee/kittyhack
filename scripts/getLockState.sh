@@ -2,10 +2,10 @@
 
 case "$1" in
 i)  # inner magnetic lock
-    cat /sys/class/gpio/gpio525/value
+    /bin/cat /sys/class/gpio/gpio525/value
     ;;
 o)  # outer magnetic lock
-    cat /sys/class/gpio/gpio524/value
+    /bin/cat /sys/class/gpio/gpio524/value
     ;;
 *) # show some usage information
     echo "For checking the magnetic locks state, please choose an option."
