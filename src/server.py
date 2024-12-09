@@ -359,7 +359,7 @@ def server(input, output, session):
         lock = "i" if input.btnOpenKittyflapInside() else "null"
         success = systemcmd(["/root/kittyhack/scripts/overrideLock.sh", lock], simulate_kittyflap)
         if success:
-            ui.notification_show(_("Inside lock is opening now..." if input.btnOpenKittyflaptInside() else "Inside lock is closing now..."), duration=5, type="message")
+            ui.notification_show(_("Inside lock is opening now..." if input.btnOpenKittyflapInside() else "Inside lock is closing now..."), duration=5, type="message")
         else:
             ui.notification_show(_("An error occurred while opening inside lock."), duration=5, type="error")
     
