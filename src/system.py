@@ -32,7 +32,7 @@ def systemctl(mode: str, service: str, simulate_operations=False):
     
     return True
 
-def systemcmd(command: list[str], simulate_operations=False):
+def systemcmd(command: list[str], simulate_operations=False, return_output=False):
     """
     Run any command on the system shell.
 
@@ -57,37 +57,6 @@ def systemcmd(command: list[str], simulate_operations=False):
                 capture_output=True
             )
             logging.info(f"systemcmd '{cString}': {result.stdout}")
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Failed to run command '{cString}': {e.stderr}")
-            return False
-    
-    return True
-
-def getfromsystemcmd(command: list[str], simulate_operations=False, return_output=False):
-    """
-    Run any command on the system shell and retrieve result.
-
-    Parameters:
-    - commands: list of (tokenized) commands
-
-    Returns:
-    - True, if the action succeeded
-    - False in case of an exception
-    """
-    
-    cString = ' '.join(command)
-    # run command
-    if simulate_operations == True:
-        logging.info(f"kittyhack is in development mode. Skip 'systemcmd {cString}'.")
-    else:
-        try:
-            result = subprocess.check_output(
-                command,
-                check=True,
-                text=True,
-                capture_output=True
-            )
-            logging.info(f"systemcmd '{cString}': {result.stdout}")
 
             if return_output == True:
                 return result.stdout
@@ -96,3 +65,4 @@ def getfromsystemcmd(command: list[str], simulate_operations=False, return_outpu
             return False
     
     return True
+	
