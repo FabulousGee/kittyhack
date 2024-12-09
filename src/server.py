@@ -323,17 +323,16 @@ def server(input, output, session):
     @render.ui
     def ui_system():
         simulate_kittyflap = CONFIG['SIMULATE_KITTYFLAP'].lower() == "true"
-        lockOutside = systemcmd(["/root/kittyhack/scripts/getLockState.sh", "o"], simulate_kittyflap, True)
-        lockInside = systemcmd(["/root/kittyhack/scripts/getLockState.sh", "i"], simulate_kittyflap, True)
+        lockOutside = int(systemcmd(["/root/kittyhack/scripts/getLockState.sh", "o"], simulate_kittyflap, True))
+        lockInside = int(systemcmd(["/root/kittyhack/scripts/getLockState.sh", "i"], simulate_kittyflap, True))
         
         return ui.div(
             ui.column(12, ui.h3(_("Kittyflap System Actions"))),
             ui.column(12, ui.help_text(_("Start tasks/actions on the Kittyflap"))),
             ui.br(),
-            ui.column(12, btnOpenKittyflapOutside := ui.input_switch("btnOpenKittyflapOutside", _("Let kitty out"), lockOutside)),
+            ui.column(12, btnOpenKittyflapOutside := ui.input_switch("btnOpenKittyflapOutside", _("Open outside lock"), lockOutside)),
             ui.br(),
-            ui.br(),
-            ui.column(12, btnOpenKittyflapInside := ui.input_switch("btnOpenKittyflapInside", _("Let kitty in"), lockInside)),
+            ui.column(12, btnOpenKittyflapInside := ui.input_switch("btnOpenKittyflapInside", _("Open inside lock"), lockInside)),
             ui.hr(),
             ui.input_action_button("btnRestartKittyflap", _("Restart Kittyflap")),
             ui.hr(),
@@ -342,23 +341,27 @@ def server(input, output, session):
         )
     
     @reactive.Effect
-    @reactive.event(input.btnOpenKittyflapOutside)
+    @reactive.event(input.btnOpenKittyflapOutside, ignore_init = True)
     def on_action_open_kittyflap_outside():
         simulate_kittyflap = CONFIG['SIMULATE_KITTYFLAP'].lower() == "true"
         lock = "o" if input.btnOpenKittyflapOutside() else "null"
         success = systemcmd(["/root/kittyhack/scripts/overrideLock.sh", lock], simulate_kittyflap)
         if success:
+			# set the other switch button to disabled since there is only one lock unlocked at once
+			#ui.update_switch(input.btnOpenKittyflapInside, label=None, value=False, session=None)
             ui.notification_show(_("Outside lock is opening now..." if input.btnOpenKittyflapOutside() else "Outside lock is closing now..."), duration=5, type="message")
         else:
             ui.notification_show(_("An error occurred while opening outside lock."), duration=5, type="error")
     
     @reactive.Effect
-    @reactive.event(input.btnOpenKittyflapInside)
+    @reactive.event(input.btnOpenKittyflapInside, ignore_init = True)
     def on_action_open_kittyflap_inside():
         simulate_kittyflap = CONFIG['SIMULATE_KITTYFLAP'].lower() == "true"
         lock = "i" if input.btnOpenKittyflapInside() else "null"
         success = systemcmd(["/root/kittyhack/scripts/overrideLock.sh", lock], simulate_kittyflap)
         if success:
+			# set the other switch button to disabled since there is only one lock unlocked at once
+			#ui.update_switch(input.btnOpenKittyflapOutside, label=None, value=False, session=None)
             ui.notification_show(_("Inside lock is opening now..." if input.btnOpenKittyflapInside() else "Inside lock is closing now..."), duration=5, type="message")
         else:
             ui.notification_show(_("An error occurred while opening inside lock."), duration=5, type="error")
