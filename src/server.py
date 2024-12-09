@@ -328,11 +328,10 @@ def server(input, output, session):
                 ui.br(),
                 ui.input_action_button("bOpenKittyflapOutside", _("Let kitty out")),
                 ui.br(),
+                ui.br(),
                 ui.input_action_button("bOpenKittyflapInside", _("Let kitty in")),
                 ui.hr(),
-                ui.input_action_button("bRestartKworker", _("Restart Kittyflap (service)")),
-                ui.br(),
-                ui.input_action_button("bRestartKittyflap", _("Restart Kittyflap (device)")),
+                ui.input_action_button("bRestartKittyflap", _("Restart Kittyflap")),
                 ui.hr(),
                 ui.br(),
                 ui.br()
@@ -357,16 +356,6 @@ def server(input, output, session):
             ui.notification_show(_("Kittyflap is opening now..."), duration=5, type="message")
         else:
             ui.notification_show(_("An error occurred while opening Kittyflap."), duration=5, type="error")
-    
-    @reactive.Effect
-    @reactive.event(input.bRestartKworker)
-    def on_action_restart_system():
-        simulate_kittyflap = CONFIG['SIMULATE_KITTYFLAP'].lower() == "true"
-        success = systemcmd(["systemctl", "restart", "kwork.service"], simulate_kittyflap)
-        if success:
-            ui.notification_show(_("Kittyflap service is restarting now..."), duration=5, type="message")
-        else:
-            ui.notification_show(_("An error occurred while restarting Kittyflap service."), duration=5, type="error")
     
     @reactive.Effect
     @reactive.event(input.bRestartKittyflap)
