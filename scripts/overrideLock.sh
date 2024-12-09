@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Beide Magnetic Locks gleichzeitig öffnen ist aktuell nicht möglich!
-# Vermutlich brauchen diese zu viel Strom und bringen das CM zum Absturz.
+# Opening both magnetic locks is currently not possible!
+# I suspect they draw to much current and lead to a system error. (CM needs hard reboot then)
 
-# Magnet außen schließen
+# close outer magnet lock
 echo 0 > /sys/class/gpio/gpio524/value
-# Magnet innen schließen
+# close inner magnetic lock
 echo 0 > /sys/class/gpio/gpio525/value
 
 case "$1" in
