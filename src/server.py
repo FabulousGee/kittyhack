@@ -322,43 +322,49 @@ def server(input, output, session):
     @output
     @render.ui
     def ui_system():
-            return ui.div(
-                ui.column(12, ui.h3(_("Kittyflap System Actions"))),
-                ui.column(12, ui.help_text(_("Start tasks/actions on the Kittyflap"))),
-                ui.br(),
-                ui.input_action_button("bOpenKittyflapOutside", _("Let kitty out")),
-                ui.br(),
-                ui.br(),
-                ui.input_action_button("bOpenKittyflapInside", _("Let kitty in")),
-                ui.hr(),
-                ui.input_action_button("bRestartKittyflap", _("Restart Kittyflap")),
-                ui.hr(),
-                ui.br(),
-                ui.br()
-            )
+        simulate_kittyflap = CONFIG['SIMULATE_KITTYFLAP'].lower() == "true"
+        lockOutside = systemcmd(["/root/kittyhack/scripts/getLockState.sh", "o"], simulate_kittyflap, True)
+        lockInside = systemcmd(["/root/kittyhack/scripts/getLockState.sh", "i"], simulate_kittyflap, True)
+        
+        return ui.div(
+            ui.column(12, ui.h3(_("Kittyflap System Actions"))),
+            ui.column(12, ui.help_text(_("Start tasks/actions on the Kittyflap"))),
+            ui.br(),
+            ui.column(12, btnOpenKittyflapOutside := ui.input_switch("btnOpenKittyflapOutside", _("Let kitty out"), lockOutside)),
+            ui.br(),
+            ui.br(),
+            ui.column(12, btnOpenKittyflapInside := ui.input_switch("btnOpenKittyflapInside", _("Let kitty in"), lockInside)),
+            ui.hr(),
+            ui.input_action_button("btnRestartKittyflap", _("Restart Kittyflap")),
+            ui.hr(),
+            ui.br(),
+            ui.br()
+        )
     
     @reactive.Effect
-    @reactive.event(input.bOpenKittyflapOutside)
+    @reactive.event(input.btnOpenKittyflapOutside)
     def on_action_open_kittyflap_outside():
         simulate_kittyflap = CONFIG['SIMULATE_KITTYFLAP'].lower() == "true"
-        success = systemcmd(["/root/kittyhack/scripts/overrideLock.sh", "o"], simulate_kittyflap)
+        lock = "o" if input.btnOpenKittyflapInside() else "null"
+        success = systemcmd(["/root/kittyhack/scripts/overrideLock.sh", lock], simulate_kittyflap)
         if success:
             ui.notification_show(_("Kittyflap is opening now..."), duration=5, type="message")
         else:
             ui.notification_show(_("An error occurred while opening Kittyflap."), duration=5, type="error")
     
     @reactive.Effect
-    @reactive.event(input.bOpenKittyflapInside)
+    @reactive.event(input.btnOpenKittyflapInside)
     def on_action_open_kittyflap_inside():
         simulate_kittyflap = CONFIG['SIMULATE_KITTYFLAP'].lower() == "true"
-        success = systemcmd(["/root/kittyhack/scripts/overrideLock.sh", "i"], simulate_kittyflap)
+        lock = "i" if input.btnOpenKittyflapInside() else "null"
+        success = systemcmd(["/root/kittyhack/scripts/overrideLock.sh", lock], simulate_kittyflap)
         if success:
             ui.notification_show(_("Kittyflap is opening now..."), duration=5, type="message")
         else:
             ui.notification_show(_("An error occurred while opening Kittyflap."), duration=5, type="error")
     
     @reactive.Effect
-    @reactive.event(input.bRestartKittyflap)
+    @reactive.event(input.btnRestartKittyflap)
     def on_action_restart_system():
         simulate_kittyflap = CONFIG['SIMULATE_KITTYFLAP'].lower() == "true"
         success = systemcmd(["/sbin/reboot"], simulate_kittyflap)
