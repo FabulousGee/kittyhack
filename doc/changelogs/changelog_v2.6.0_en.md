@@ -14,6 +14,9 @@ This release introduces a token-authenticated REST API for remote control and sc
   Door actions are routed through the existing `manual_door_override` mechanism, so all safety rules (max-unlock timeout, prey-detection auto-lock, MQTT mirroring) continue to apply.
 - **API token management in the System tab**: create, list and revoke tokens from the Web UI. Tokens are shown only once at creation and stored as SHA-256 hashes in `api_tokens.json` (preserved across updates). Authentication accepts `Authorization: Bearer <token>` header, `X-API-Key: <token>` header, or `?token=<token>` query parameter — the latter specifically so URL-only clients like Stream Deck can trigger actions with a single URL. Failed auth attempts are rate-limited to 10 per source IP per 60 seconds.
 
+## Improvements
+- **Custom update repository now accepts GitHub's PR head-ref shorthand**: the *Configuration → Update repository* field now recognises `owner:branch` (e.g. `FabulousGee:feat/rest-api`) in addition to `owner/repo` and `owner/repo@branch-or-tag`. Values can therefore be copied directly from a pull request header on github.com. On save the value is normalised to the canonical `owner/repo@branch` form, so config files stay clean regardless of which shape was typed.
+
 ## Documentation
 - **`CLAUDE.md`** added at the repo root: project orientation notes for AI-assisted development sessions (file map, target-vs-remote architecture, Shiny conventions, config add pattern, i18n workflow, release process, update-flow caveats, WLAN-watchdog design, and a collected list of lessons learned from recent PRs).
 

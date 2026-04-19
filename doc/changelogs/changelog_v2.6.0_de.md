@@ -14,6 +14,9 @@ Dieses Release führt eine token-authentifizierte REST-API für Remote-Steuerung
   Klappenbefehle laufen über den bestehenden `manual_door_override`-Pfad — alle Sicherheitsregeln (maximale Entriegelungsdauer, automatische Verriegelung bei Beute-Erkennung, MQTT-Spiegelung) greifen weiterhin.
 - **API-Token-Verwaltung im System-Tab**: Tokens direkt in der WebGUI erstellen, auflisten und widerrufen. Der Token wird nur einmal bei der Erstellung angezeigt und als SHA-256-Hash in `api_tokens.json` gespeichert (überlebt Updates). Die Authentifizierung akzeptiert den `Authorization: Bearer <token>`-Header, den `X-API-Key: <token>`-Header oder den `?token=<token>`-Query-Parameter — letzteres speziell für URL-only-Clients wie Stream Deck, die Aktionen mit einer einzigen URL auslösen. Fehlgeschlagene Versuche werden pro Quell-IP auf 10 innerhalb von 60 Sekunden begrenzt.
 
+## Verbesserungen
+- **Benutzerdefiniertes Update-Repository akzeptiert jetzt auch GitHubs PR-Kurzform**: Das Feld *Konfiguration → Update-Repository* erkennt zusätzlich zu `owner/repo` und `owner/repo@branch-oder-tag` auch `owner:branch` (z. B. `FabulousGee:feat/rest-api`). Werte können damit direkt aus dem Kopf einer Pull-Request-Seite auf github.com kopiert werden. Beim Speichern wird der Wert intern in die kanonische `owner/repo@branch`-Form normalisiert, damit die Konfigurationsdatei unabhängig von der Eingabeform sauber bleibt.
+
 ## Dokumentation
 - **`CLAUDE.md`** im Projekt-Root: Orientierungs-Notizen für KI-gestützte Entwicklungs-Sitzungen (Datei-Übersicht, Target-vs-Remote-Architektur, Shiny-Konventionen, Pattern für neue Config-Felder, i18n-Workflow, Release-Prozess, Stolperfallen beim Update-Flow, WLAN-Watchdog-Design sowie eine gesammelte Liste der Erkenntnisse aus den letzten PRs).
 
