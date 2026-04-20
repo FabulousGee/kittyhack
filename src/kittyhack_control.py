@@ -19,6 +19,7 @@ from src.magnets_rfid import Magnets, Rfid
 from src.pir import Pir
 from src.system import systemctl
 from src.system import (
+    apply_wlan_runtime_settings,
     get_wlan_connections,
     is_gateway_reachable,
     switch_wlan_connection,
@@ -1464,17 +1465,73 @@ async def _boot_wait_supervisor():
             return
 
 
+# Shared outage state for the thread-based hard-deadline reboot watcher.
+# The async watchdog writes here when an outage begins/ends; the thread
+# checks it from outside the asyncio event loop so that a synchronous
+# subprocess hang inside the reconnect block cannot prevent the emergency
+# reboot. Dict mutation of a single key is atomic under the GIL — no lock
+# needed for this simple publisher/observer pattern.
+_wlan_outage_state: dict[str, float | None] = {"started_at": None}
+_WLAN_OUTAGE_HARD_REBOOT_SECONDS = 120.0
+# Half the hard deadline — used inside the reconnect block to stop iterating
+# over additional SSIDs when we are already at risk of missing the deadline.
+_WLAN_RECONNECT_BUDGET_SECONDS = _WLAN_OUTAGE_HARD_REBOOT_SECONDS / 2
+
+
+def _wlan_hard_deadline_watcher():
+    """Thread-based safety net for WLAN outages exceeding the hard deadline.
+
+    The async `_wlan_watchdog_loop` checks the hard deadline only at the top
+    of its 5 s tick. If the reconnect block is stuck inside sync subprocess
+    calls (systemctl / nmcli honouring their timeouts but each still running
+    for tens of seconds, for multiple saved SSIDs), the top-of-loop check
+    never runs — defeating the very safety net the hard deadline was meant to
+    provide. This thread runs outside the event loop and checks the shared
+    outage timestamp every 2 s. When the outage exceeds the hard deadline it
+    invokes `/sbin/reboot` directly, bypassing systemcmd (which has no
+    timeout) and the blocked coroutine.
+    """
+    simulate = bool(CONFIG.get("SIMULATE_KITTYFLAP"))
+    while not sigterm_monitor.stop_now:
+        time.sleep(2.0)
+        started = _wlan_outage_state.get("started_at")
+        if started is None:
+            continue
+        outage_duration = time.monotonic() - started
+        if outage_duration < _WLAN_OUTAGE_HARD_REBOOT_SECONDS:
+            continue
+        logging.error(
+            f"[WLAN WATCHDOG THREAD] Outage exceeded hard deadline "
+            f"({outage_duration:.1f}s > {_WLAN_OUTAGE_HARD_REBOOT_SECONDS}s) — "
+            f"forcing reboot from hard-deadline thread."
+        )
+        try:
+            if simulate:
+                logging.info("[WLAN WATCHDOG THREAD] (simulate) would call /sbin/reboot")
+            else:
+                subprocess.run(["/sbin/reboot"], timeout=10, capture_output=True)
+        except Exception as e:
+            logging.error(f"[WLAN WATCHDOG THREAD] /sbin/reboot failed: {e}")
+        # Either the reboot was triggered (process will be torn down shortly)
+        # or it failed. Clear the flag so we don't loop-retry a failing reboot
+        # forever, and exit the thread.
+        _wlan_outage_state["started_at"] = None
+        return
+
+
 async def _wlan_watchdog_loop():
     # Run on target device, independent from kittyhack.service.
     wlan_disconnect_counter = 0
     wlan_reconnect_attempted = False
     last_skip_log_ts = 0.0
+
     while not sigterm_monitor.stop_now:
         await asyncio.sleep(5.0)
 
         if not bool(CONFIG.get("WLAN_WATCHDOG_ENABLED", True)):
             wlan_disconnect_counter = 0
             wlan_reconnect_attempted = False
+            _wlan_outage_state["started_at"] = None
             continue
 
         # Pause watchdog actions during user-triggered WLAN reconfiguration from WebUI.
@@ -1485,6 +1542,7 @@ async def _wlan_watchdog_loop():
                 last_skip_log_ts = now
             wlan_disconnect_counter = 0
             wlan_reconnect_attempted = False
+            _wlan_outage_state["started_at"] = None
             continue
 
         # Determine WLAN state
@@ -1499,9 +1557,36 @@ async def _wlan_watchdog_loop():
             gateway_reachable = False
 
         if wlan_connected and gateway_reachable:
+            started = _wlan_outage_state.get("started_at")
+            if started is not None:
+                outage_duration = time.monotonic() - started
+                logging.info(f"[WLAN WATCHDOG] Link recovered after {outage_duration:.1f}s outage.")
             wlan_disconnect_counter = 0
             wlan_reconnect_attempted = False
+            _wlan_outage_state["started_at"] = None
             continue
+
+        # Start of an outage: publish wall-clock start for both the top-of-loop
+        # check below and the thread-based watcher that runs outside the event loop.
+        if _wlan_outage_state.get("started_at") is None:
+            _wlan_outage_state["started_at"] = time.monotonic()
+
+        outage_started_at = _wlan_outage_state["started_at"]
+
+        # Hard-deadline safety net (in-loop branch). The authoritative check
+        # runs in `_wlan_hard_deadline_watcher` on a dedicated thread — this
+        # one only fires when the loop is healthy enough to reach its top.
+        outage_duration = time.monotonic() - outage_started_at
+        if outage_duration > _WLAN_OUTAGE_HARD_REBOOT_SECONDS:
+            logging.error(
+                f"[WLAN WATCHDOG] Hard deadline exceeded ({outage_duration:.1f}s > "
+                f"{_WLAN_OUTAGE_HARD_REBOOT_SECONDS}s) — forcing reboot."
+            )
+            try:
+                systemcmd(["/sbin/reboot"], bool(CONFIG.get("SIMULATE_KITTYFLAP")))
+            except Exception:
+                pass
+            return
 
         wlan_disconnect_counter += 1
         if wlan_disconnect_counter <= 5:
@@ -1524,6 +1609,19 @@ async def _wlan_watchdog_loop():
                 sorted_wlans = []
 
             for wlan in sorted_wlans:
+                # Stop iterating more SSIDs once we have burned half the hard
+                # deadline on reconnect attempts — the thread-based watcher
+                # will still catch us if we overshoot, but this lets us fail
+                # fast and return to the top-of-loop on typical outages with
+                # several saved SSIDs.
+                elapsed = time.monotonic() - outage_started_at
+                if elapsed > _WLAN_RECONNECT_BUDGET_SECONDS:
+                    logging.warning(
+                        f"[WLAN WATCHDOG] Reconnect budget exhausted ({elapsed:.1f}s > "
+                        f"{_WLAN_RECONNECT_BUDGET_SECONDS}s); aborting SSID iteration."
+                    )
+                    break
+
                 ssid = str(wlan.get("ssid") or "")
                 if not ssid:
                     continue
@@ -1549,8 +1647,15 @@ async def _wlan_watchdog_loop():
                         pass
                 if ok:
                     logging.info(f"[WLAN WATCHDOG] Successfully reconnected to SSID: {ssid}")
+                    # Re-apply TX-power / power_save after re-association — Broadcom
+                    # chipsets often revert these on reconnect and then behave flaky.
+                    try:
+                        apply_wlan_runtime_settings()
+                    except Exception as e:
+                        logging.warning(f"[WLAN WATCHDOG] apply_wlan_runtime_settings after reconnect failed: {e}")
                     wlan_disconnect_counter = 0
                     wlan_reconnect_attempted = False
+                    _wlan_outage_state["started_at"] = None
                     break
 
             wlan_reconnect_attempted = True
@@ -1573,13 +1678,9 @@ async def main():
         return
 
     # Align WLAN runtime settings with server.py startup behavior.
-    try:
-        logging.info(f"Setting WLAN TX Power to {CONFIG['WLAN_TX_POWER']} dBm...")
-        systemcmd(["iwconfig", "wlan0", "txpower", f"{CONFIG['WLAN_TX_POWER']}"] , CONFIG['SIMULATE_KITTYFLAP'])
-        logging.info("Disabling WiFi power saving mode...")
-        systemcmd(["iw", "dev", "wlan0", "set", "power_save", "off"], CONFIG['SIMULATE_KITTYFLAP'])
-    except Exception as e:
-        logging.warning(f"[CONTROL] Failed to apply WLAN runtime settings: {e}")
+    # The watchdog calls the same helper after a successful reconnect so flaky
+    # chipsets keep the configured tx-power + power_save values after re-association.
+    apply_wlan_runtime_settings()
 
     # Enforce target-mode boot semantics: kittyhack_control supervises kittyhack startup.
     # Best-effort: prevent kittyhack.service from auto-starting on subsequent boots.
@@ -1594,8 +1695,16 @@ async def main():
     async with websockets.serve(_handler, host="0.0.0.0", port=8888, ping_interval=None):
         logging.info("[CONTROL] kittyhack_control listening on 0.0.0.0:8888")
 
-        # Start WLAN watchdog (target side)
+        # Start WLAN watchdog (target side) + its thread-based hard-deadline
+        # safety net. The thread runs outside the asyncio event loop so it can
+        # still fire a reboot even if the async loop is blocked in a sync
+        # subprocess call inside the reconnect path.
         asyncio.create_task(_wlan_watchdog_loop())
+        threading.Thread(
+            target=_wlan_hard_deadline_watcher,
+            name="wlan-hard-deadline-watcher",
+            daemon=True,
+        ).start()
 
         # Boot wait supervisor (only if marker exists)
         asyncio.create_task(_boot_wait_supervisor())
