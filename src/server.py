@@ -53,6 +53,7 @@ from src.helper import (
     get_local_date_from_utc_date,
     format_date_minmax,
     normalize_version,
+    is_same_kittyhack_version,
     log_relevant_deb_packages,
     log_system_information,
     icon_svg_local,
@@ -2725,7 +2726,7 @@ def server(input, output, session):
         ui.modal_remove()
     
     # Show a notification if a new version of Kittyhack is available
-    if CONFIG['LATEST_VERSION'] != "unknown" and CONFIG['LATEST_VERSION'] != git_version and CONFIG['PERIODIC_VERSION_CHECK']:
+    if CONFIG['LATEST_VERSION'] != "unknown" and not is_same_kittyhack_version(git_version, CONFIG['LATEST_VERSION']) and CONFIG['PERIODIC_VERSION_CHECK']:
         ui.notification_show(_("A new version of Kittyhack is available: {}. Go to the [INFO] section for update instructions.").format(CONFIG['LATEST_VERSION']), duration=10, type="message")
 
     # Show a warning if the remaining disk space is below the critical threshold
@@ -6722,7 +6723,7 @@ def server(input, output, session):
                                     "update_repository",
                                     _("Custom repository"),
                                     value=CONFIG.get('UPDATE_REPOSITORY', ''),
-                                    placeholder=_("e.g. owner/repo or owner/repo@branch"),
+                                    placeholder=_("e.g. owner/repo@branch or owner:branch"),
                                     width="100%",
                                 ),
                                 id="update_repository_container",
@@ -6733,8 +6734,12 @@ def server(input, output, session):
                                     _(
                                         "Use **Standard** for official releases from `floppyFK/kittyhack`. "
                                         "Select **Custom** to test your own fork or a feature branch. "
-                                        "Format: `owner/repo` (uses the repo's latest release tag) or "
-                                        "`owner/repo@branch-or-tag` (tracks the specified ref)."
+                                        "Accepted formats:\n\n"
+                                        "- `owner/repo` — latest release tag from that fork\n"
+                                        "- `owner/repo@branch-or-tag` — track the specified ref\n"
+                                        "- `owner:branch` — GitHub PR head-ref shorthand; "
+                                        "you can copy it straight from a pull request header, "
+                                        "the repo name defaults to `kittyhack`"
                                     )
                                 ),
                                 style_="color: grey;",
@@ -7877,20 +7882,45 @@ def server(input, output, session):
             if not valid:
                 return
             
-        # Validate custom update repository spec when "custom" mode is selected.
+        # Validate + normalize custom update repository spec when "custom" mode is selected.
+        # The user may type several equivalent forms (owner/repo, owner/repo@ref,
+        # owner:branch with GitHub PR shorthand). We store the canonical form.
+        normalized_update_repo: str | None = None
         if input.update_repository_mode() == "custom":
-            raw_repo_spec = (input.update_repository() or "").strip()
-            if not re.match(
-                r"^(?:https?://github\.com/)?[\w.-]+/[\w.-]+?(?:\.git)?(?:@[\w./\-]+)?$",
-                raw_repo_spec,
-            ):
+            from src.helper import normalize_repo_spec, check_custom_update_repo_reachable
+            normalized_update_repo = normalize_repo_spec(input.update_repository() or "")
+            if normalized_update_repo is None:
                 ui.notification_show(
                     _("Update repository: ") +
-                    _("Invalid format. Use 'owner/repo' or 'owner/repo@branch-or-tag'.") + "\n" +
+                    _("Invalid format. Use 'owner/repo', 'owner/repo@branch-or-tag', or 'owner:branch'.") + "\n" +
                     _("Changes were not saved."),
                     duration=10, type="error"
                 )
                 return
+
+            # Existence check against GitHub. Skipped when the spec is unchanged so
+            # a transient network glitch cannot block unrelated settings saves on
+            # an already-validated spec.
+            spec_changed = (
+                _prev_update_mode != "custom"
+                or _prev_update_repo != normalized_update_repo
+            )
+            if spec_changed:
+                ok, reason, detail = check_custom_update_repo_reachable(normalized_update_repo)
+                if not ok:
+                    if reason == "repo_not_found":
+                        msg = _("Repository '{}' was not found on GitHub.").format(detail)
+                    elif reason == "ref_not_found":
+                        msg = _("Branch or tag '{}' was not found on GitHub.").format(detail)
+                    elif reason == "network_error":
+                        msg = _("Could not reach GitHub to verify the custom repository: {}").format(detail)
+                    else:
+                        msg = _("Custom update repository could not be validated.")
+                    ui.notification_show(
+                        _("Update repository: ") + msg + "\n" + _("Changes were not saved."),
+                        duration=12, type="error"
+                    )
+                    return
 
         # Check for a changed hostname
         hostname_changed = input.txtHostname() != get_hostname()
@@ -7985,7 +8015,13 @@ def server(input, output, session):
         CONFIG['ALLOWED_TO_EXIT'] = ATE(input.btnAllowedToExit())
         CONFIG['PERIODIC_VERSION_CHECK'] = input.btnPeriodicVersionCheck()
         CONFIG['UPDATE_REPOSITORY_MODE'] = input.update_repository_mode()
-        CONFIG['UPDATE_REPOSITORY'] = (input.update_repository() or "").strip()
+        # Use the normalized value computed during validation above, or keep the
+        # raw input when mode is 'standard' (UPDATE_REPOSITORY is ignored there).
+        CONFIG['UPDATE_REPOSITORY'] = (
+            normalized_update_repo
+            if normalized_update_repo is not None
+            else (input.update_repository() or "").strip()
+        )
         # TODO: Outside PIR shall not yet be configurable. Need to redesign the camera control, otherwise we will have no cat pictures at high PIR thresholds.
         #CONFIG['PIR_OUTSIDE_THRESHOLD'] = 10-int(input.sldPirOutsideThreshold())
         CONFIG['PIR_INSIDE_THRESHOLD'] = float(input.sldPirInsideThreshold())
@@ -8670,7 +8706,7 @@ def server(input, output, session):
                         style_="text-align: center;"
                     ),
                 )
-        elif git_version != latest_version:
+        elif not is_same_kittyhack_version(git_version, latest_version):
             release_notes_block = None
             try:
                 # Fetch the release notes of the latest version
@@ -9378,7 +9414,7 @@ def server(input, output, session):
                                 info = client.request_target_version(timeout=1.0) or client.get_target_version_info()
                                 target_git_version = str((info or {}).get("git_version") or "").strip()
                                 if target_git_version and target_git_version not in ("unknown",):
-                                    if str(target_git_version) == str(latest_version):
+                                    if is_same_kittyhack_version(str(target_git_version), str(latest_version)):
                                         set_update_progress(
                                             in_progress=True,
                                             step=1,
@@ -9422,7 +9458,7 @@ def server(input, output, session):
                                 if target_git_version:
                                     break
                             if target_git_version and target_git_version not in ("unknown",):
-                                if str(target_git_version) != str(latest_version):
+                                if not is_same_kittyhack_version(str(target_git_version), str(latest_version)):
                                     _set_error_and_stop(
                                         _("Target device reconnected, but version is still {} instead of {}.").format(
                                             target_git_version,

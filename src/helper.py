@@ -394,6 +394,28 @@ def normalize_version(version_str):
     if '-' in version_str:
         version_str = version_str.split('-')[0]
     return version_str
+
+def is_same_kittyhack_version(installed: str, reference: str) -> bool:
+    """
+    True when the installed version matches the reference version.
+
+    Standard / tag mode: reference is a plain tag ("v2.5.4") — compared by
+    direct equality, identical to the previous behaviour.
+
+    Branch mode: reference has the form "<ref>@<short-sha>" (see
+    read_latest_kittyhack_version). The installed side reports just the
+    short SHA (get_git_version falls back to `git rev-parse --short HEAD`
+    when the commit has no tag), so compare against the SHA suffix.
+    """
+    if not installed or not reference:
+        return False
+    if installed == reference:
+        return True
+    if "@" in reference:
+        _, _, ref_sha = reference.rpartition("@")
+        if ref_sha and ref_sha == installed:
+            return True
+    return False
     
 def get_timezone():
     """
@@ -454,20 +476,110 @@ DEFAULT_UPDATE_REPO_NAME = "kittyhack"
 
 
 def _parse_repo_spec(raw: str):
-    """Parse 'owner/repo' or 'owner/repo@ref' (optionally with URL prefix).
+    """Parse a user-supplied repository spec.
+
+    Accepted forms:
+      - `owner/repo`
+      - `owner/repo@ref`
+      - `owner:branch` (GitHub PR head-ref shorthand — implies the default
+        repo name `kittyhack`, so values can be copied straight from a PR
+        page on github.com)
+      - an optional `https://github.com/` prefix and/or `.git` suffix on
+        the first two forms
 
     Returns (owner, repo, ref_or_None) or (None, None, None) if invalid.
     """
     if not raw:
         return None, None, None
     raw = raw.strip()
+
+    # Slash form: owner/repo[@ref], possibly with URL wrapping.
     m = re.match(
         r"^(?:https?://github\.com/)?([\w.-]+)/([\w.-]+?)(?:\.git)?(?:@([\w./\-]+))?$",
         raw,
     )
-    if not m:
-        return None, None, None
-    return m.group(1), m.group(2), m.group(3) or None
+    if m:
+        return m.group(1), m.group(2), m.group(3) or None
+
+    # Colon form: owner:branch — GitHub's "head ref" shorthand that shows up
+    # in the PR header ("wants to merge N commits from FabulousGee:feat/xyz").
+    # Repo name is implicit and defaults to this project.
+    m = re.match(r"^([\w.-]+):([\w./\-]+)$", raw)
+    if m:
+        return m.group(1), DEFAULT_UPDATE_REPO_NAME, m.group(2)
+
+    return None, None, None
+
+
+def normalize_repo_spec(raw: str) -> str | None:
+    """Return the canonical `owner/repo[@ref]` form, or None if invalid.
+
+    Used by the Configuration tab save handler to store a clean value
+    regardless of which accepted input form the user typed.
+    """
+    owner, repo, ref = _parse_repo_spec(raw)
+    if not owner or not repo:
+        return None
+    return f"{owner}/{repo}" + (f"@{ref}" if ref else "")
+
+
+def check_custom_update_repo_reachable(raw_spec: str, timeout: float = 5.0):
+    """Verify that `raw_spec` resolves to an existing GitHub repo + ref.
+
+    Hits up to two unauthenticated GitHub REST API endpoints:
+      - `/repos/{owner}/{repo}` to confirm the repository exists.
+      - `/repos/{owner}/{repo}/commits/{ref}` to confirm the branch, tag or
+        SHA exists (only when a ref is provided — the commits endpoint
+        resolves all three).
+
+    Intended for save-time validation in the configuration handler so
+    that typos like `asdasd/kittyhack@no-owner` are rejected before they
+    land in config.ini and trigger a futile update attempt.
+
+    Returns `(ok, reason, detail)`:
+      - `(True,  "",               "")`                         reachable
+      - `(False, "invalid_format", "")`                         parse failed
+      - `(False, "repo_not_found", "owner/repo")`               repo is 404
+      - `(False, "ref_not_found",  "owner/repo@ref")`           ref is 404
+      - `(False, "network_error",  "<short description>")`      request failed
+
+    The caller is responsible for presenting a translated message; the
+    string codes are stable and safe to switch on.
+    """
+    owner, repo, ref = _parse_repo_spec(raw_spec)
+    if not owner or not repo:
+        return False, "invalid_format", ""
+
+    try:
+        r = requests.get(
+            f"https://api.github.com/repos/{owner}/{repo}",
+            timeout=timeout,
+        )
+    except requests.RequestException as e:
+        return False, "network_error", str(e)
+
+    if r.status_code == 404:
+        return False, "repo_not_found", f"{owner}/{repo}"
+    if r.status_code != 200:
+        return False, "network_error", f"HTTP {r.status_code} for {owner}/{repo}"
+
+    if ref is None:
+        return True, "", ""
+
+    try:
+        r = requests.get(
+            f"https://api.github.com/repos/{owner}/{repo}/commits/{ref}",
+            timeout=timeout,
+        )
+    except requests.RequestException as e:
+        return False, "network_error", str(e)
+
+    if r.status_code == 404:
+        return False, "ref_not_found", f"{owner}/{repo}@{ref}"
+    if r.status_code != 200:
+        return False, "network_error", f"HTTP {r.status_code} for {owner}/{repo}@{ref}"
+
+    return True, "", ""
 
 
 def resolved_update_repo():
